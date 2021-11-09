@@ -13,6 +13,7 @@
 #include <future>
 #include <random>
 #include <mutex>
+#include <condition_variable>
 
 class UniformRandInt
 {
@@ -45,7 +46,6 @@ struct ThreadStruct
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Any new data to pass to thread should be put here
 	///////////////////////////////////////////////////////////////////////////////////	
-
 	std::promise<int> promiseID;
 	std::atomic<int> counter;
 };
@@ -67,8 +67,9 @@ void Pause()
 //
 // Note: You are required to use a std::promise to implement this logic.
 ////////////////////////////////////////////////////////////////////////////////////
-void printer(ThreadStruct *threadData, std::future<int> _futureWork)
+void waitprinter(ThreadStruct *threadData)
 {
+	std::future<int> _futureWork = threadData->promiseID.get_future();
 	printf("Thread ID : %d, Work: %d", threadData->id, _futureWork.get());
 }
 ///////////////////////////////////////////////////////////////////////////////////
@@ -79,6 +80,9 @@ void printer(ThreadStruct *threadData, std::future<int> _futureWork)
 ///////////////////////////////////////////////////////////////////////////////////
 void JoinableThreadEntrypoint(ThreadStruct *threadData)
 {
+
+
+
 	////////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Create a joinable thread to print the value of 'work' once it's generated.
 	//   The printer (or "process work") thread MUST be created before 'work' is initialized and it must not
@@ -86,15 +90,11 @@ void JoinableThreadEntrypoint(ThreadStruct *threadData)
 	//
 	// Note: You are required to use a std::promise to implement the printing logic.
 	////////////////////////////////////////////////////////////////////////////////////
+
+	 std::thread workerinj(waitprinter, threadData);
+	 workerinj.join();
+
 	
-	
-	/*std::promise<int> printerPromise;
-	std::future<int> printerFuture = printerPromise.get_future();
-	std::thread worker(&printer, &threadData, &printerFuture);
-	if (worker.joinable())
-	{
-		worker.join();
-	}*/
 
 	int workLimit = (threadData->id + 1) + (threadData->myRand());
 	int work = 0;
@@ -113,7 +113,10 @@ void JoinableThreadEntrypoint(ThreadStruct *threadData)
 	// TODO:: The 'work' has been generated and the printing thread should be waiting
 	//   on the promised work to be set. Set it now so the printing thread can resume.
 	///////////////////////////////////////////////////////////////////////////////////
-	//printerPromise.set_value(work);
+	threadData->counter--; //decraments thread counter
+	threadData->promiseID.set_value(work);
+
+	
 }
 
 ///////////////////////////////////////////////////////////////////////////////////
@@ -132,13 +135,11 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 	// Note: You are required to use a std::promise to implement the printing logic.
 	////////////////////////////////////////////////////////////////////////////////////
 
-	/*std::promise<int> printerPromise;
-	std::future<int> printerFuture = printerPromise.get_future();
-	std::thread worker(&printer, &threadData, &printerFuture);
+	std::thread worker(waitprinter, threadData);
 	if (worker.joinable())
 	{
 		worker.join();
-	}*/
+	}
 
 
 
@@ -148,8 +149,9 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 	
 
 	printf("START: Detached Thread %d, starting limit = %d\n", threadData->id, workLimit);
-	while(true)
-	{ 
+	while (true)
+	{
+	
 		////////////////////////////////////////////////////////////////////////////////
 		// TODO:: Break out of the work loop in a thread safe way.
 		//		  (HINT: thread safe means that only ONE thread should be check or modifying
@@ -157,30 +159,40 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 		///////////////////////////////////////////////////////////////////////////////////
 
 		// Performs some arbitrary amount of work.
+		std::mutex mudetached;
+
+		mudetached.lock();
 		for (int i = 0; i < workLimit; i += (threadData->id + 1)) 
 		{ 
 			work++;
 		}
+		mudetached.unlock();
 
+		break;
+		
 	}
-	//printerPromise.set_value(work);
+	
 
 	printf("FINISH: Detached thread %d, finished with value %d\n", threadData->id, work);
 
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Set the std::promise's value and wait for the printer thread to finish.
 	///////////////////////////////////////////////////////////////////////////////////
-	//threadData->promiseID.set_value(threadData.counter--);
+	threadData->promiseID.set_value(work);
 	//
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Let main know there's one less thread running.
 	///////////////////////////////////////////////////////////////////////////////////
+	///
+	threadData->counter--; //decraments thread counter
 }
+
 
 int main(int argc, char **argv)
 {
 	ENABLE_LEAK_DETECTION();
 
+	
 	if (argc != 2)
 	{
 		fprintf(stderr, "Usage: ThreadTypes threadCount\n\n");
@@ -226,9 +238,9 @@ int main(int argc, char **argv)
 		//   odd then the thread must execute the 'detached' logic in a detached state, otherwise
 		//   the thread must execute the 'joinable' logic.
 		///////////////////////////////////////////////////////////////////////////////////
-
 		perThreadData[i].counter = totalThreadCount;
 		perThreadData[i].promiseID = std::move(promisedID);
+		
 
 		if (!(i & 1))// lower num compared to 1 (expl. 001[1] & 1 == 1 & 1 == odd) 
 		{
@@ -240,9 +252,10 @@ int main(int argc, char **argv)
 		}
 		else
 		{
+			
 			std::thread dworker(DetachedThreadEntrypoint, &perThreadData[i]);
 			dworker.detach();
-
+			;
 
 		}
 		
@@ -274,7 +287,7 @@ int main(int argc, char **argv)
 	//   (HINT: Remember there is a specific object that can Wait for a Condition)
 	///////////////////////////////////////////////////////////////////////////////////
 	std::unique_lock<std::mutex> lock(muMain);
-	//detachedThreadCV.wait(lock, [] {return ( futureID.get() == 0 )});
+	detachedThreadCV.wait(lock);
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Cleanup
 	///////////////////////////////////////////////////////////////////////////////////
