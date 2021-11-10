@@ -15,6 +15,7 @@
 #include <mutex>
 #include <condition_variable>
 
+
 class UniformRandInt
 {
 public:
@@ -39,6 +40,8 @@ private:
 	std::uniform_int_distribution<int> distro;
 };
 
+bool dflag = false;
+
 struct ThreadStruct
 {
 	int id;									// thread number
@@ -48,6 +51,8 @@ struct ThreadStruct
 	///////////////////////////////////////////////////////////////////////////////////	
 	std::promise<int> promiseID;
 	std::atomic<int> counter;
+	
+	std::mutex muthread;
 };
 
 ///////////////////////////////////////////////////////////////////////////////////
@@ -70,7 +75,14 @@ void Pause()
 void waitprinter(ThreadStruct *threadData)
 {
 	std::future<int> _futureWork = threadData->promiseID.get_future();
-	printf("Thread ID : %d, Work: %d", threadData->id, _futureWork.get());
+	int work = _futureWork.get();
+	if (!(threadData->id & 1))
+	{
+		printf("\nMATCHME: Joinable Thread %d, returned %d \n", threadData->id, work);
+	}else
+	{
+		printf("\nMATCHME: Detached Thread %d, returned %d \n", threadData->id, work);
+	}
 }
 ///////////////////////////////////////////////////////////////////////////////////
 // Entry point for joinable threads. 
@@ -92,7 +104,7 @@ void JoinableThreadEntrypoint(ThreadStruct *threadData)
 	////////////////////////////////////////////////////////////////////////////////////
 
 	 std::thread workerinj(waitprinter, threadData);
-	 workerinj.join();
+	 
 
 	
 
@@ -115,7 +127,7 @@ void JoinableThreadEntrypoint(ThreadStruct *threadData)
 	///////////////////////////////////////////////////////////////////////////////////
 	threadData->counter--; //decraments thread counter
 	threadData->promiseID.set_value(work);
-
+	workerinj.join();
 	
 }
 
@@ -136,10 +148,9 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 	////////////////////////////////////////////////////////////////////////////////////
 
 	std::thread worker(waitprinter, threadData);
-	if (worker.joinable())
-	{
-		worker.join();
-	}
+
+
+	
 
 
 
@@ -149,6 +160,7 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 	
 
 	printf("START: Detached Thread %d, starting limit = %d\n", threadData->id, workLimit);
+	
 	while (true)
 	{
 	
@@ -159,17 +171,21 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 		///////////////////////////////////////////////////////////////////////////////////
 
 		// Performs some arbitrary amount of work.
-		std::mutex mudetached;
 
-		mudetached.lock();
+
 		for (int i = 0; i < workLimit; i += (threadData->id + 1)) 
 		{ 
 			work++;
 		}
-		mudetached.unlock();
 
-		break;
-		
+		threadData->muthread.lock();
+		if (dflag)
+		{
+			threadData->muthread.unlock();
+			break;
+		}
+		threadData->muthread.unlock();
+
 	}
 	
 
@@ -179,7 +195,7 @@ void DetachedThreadEntrypoint(ThreadStruct *threadData)
 	// TODO:: Set the std::promise's value and wait for the printer thread to finish.
 	///////////////////////////////////////////////////////////////////////////////////
 	threadData->promiseID.set_value(work);
-	//
+	worker.join();
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Let main know there's one less thread running.
 	///////////////////////////////////////////////////////////////////////////////////
@@ -239,14 +255,13 @@ int main(int argc, char **argv)
 		//   the thread must execute the 'joinable' logic.
 		///////////////////////////////////////////////////////////////////////////////////
 		perThreadData[i].counter = totalThreadCount;
-		perThreadData[i].promiseID = std::move(promisedID);
 		
 
 		if (!(i & 1))// lower num compared to 1 (expl. 001[1] & 1 == 1 & 1 == odd) 
 		{
 
-			std::thread jworker(JoinableThreadEntrypoint, &perThreadData[i]);
-			threadVectorJoinable.push_back(std::move(jworker));
+			
+			threadVectorJoinable.push_back(std::thread(JoinableThreadEntrypoint, &perThreadData[i]));
 			
 
 		}
@@ -255,7 +270,7 @@ int main(int argc, char **argv)
 			
 			std::thread dworker(DetachedThreadEntrypoint, &perThreadData[i]);
 			dworker.detach();
-			;
+			
 
 		}
 		
@@ -266,20 +281,21 @@ int main(int argc, char **argv)
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Wait for all joinable threads to complete
 	///////////////////////////////////////////////////////////////////////////////////	
-	for (auto& thread_vector_joinable : threadVectorJoinable)
+	for (auto& thread : threadVectorJoinable)
 	{
-		if (thread_vector_joinable.joinable())
+		if (thread.joinable())
 		{
-			thread_vector_joinable.join();
+			thread.join();
 		}
-		
+			
+
 	}
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: let detached threads know they need to shut down using the flag you
 	//   created in the thread structure. You may only set the flag once here (you should
 	//   not have more than one flag) and it must be in a thread safe manner.
 	///////////////////////////////////////////////////////////////////////////////////
-	
+	dflag = true;
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Wait for all detached threads to finish without using a busy-wait loop.
 	//   You must wait for the number of threads to change before checking again to avoid
@@ -287,10 +303,14 @@ int main(int argc, char **argv)
 	//   (HINT: Remember there is a specific object that can Wait for a Condition)
 	///////////////////////////////////////////////////////////////////////////////////
 	std::unique_lock<std::mutex> lock(muMain);
-	detachedThreadCV.wait(lock);
+	detachedThreadCV.wait(lock, [&]() {return perThreadData->counter == 0; });
 	///////////////////////////////////////////////////////////////////////////////////
 	// TODO:: Cleanup
 	///////////////////////////////////////////////////////////////////////////////////
+
+	delete perThreadData;
+		
+	
 	Pause();
 	
 	return 0;
