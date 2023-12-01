@@ -50,7 +50,7 @@ struct ThreadStruct
 	// TODO:: Any new data to pass to thread should be put here
 	///////////////////////////////////////////////////////////////////////////////////	
 	std::promise<int> promiseID;
-	std::atomic<int> counter;
+	int* counter;
 	
 	std::mutex muthread;
 };
@@ -254,7 +254,7 @@ int main(int argc, char **argv)
 		//   odd then the thread must execute the 'detached' logic in a detached state, otherwise
 		//   the thread must execute the 'joinable' logic.
 		///////////////////////////////////////////////////////////////////////////////////
-		perThreadData[i].counter = totalThreadCount;
+		perThreadData[i].counter = &totalThreadCount;
 		
 
 		if (!(i & 1))// lower num compared to 1 (expl. 001[1] & 1 == 1 & 1 == odd) 
